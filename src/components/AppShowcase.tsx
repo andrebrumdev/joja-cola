@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { orders, products } from "../data/mock";
+import { orderTotal, orders, products, routes } from "../data/mock";
 import can from "../assets/can.png";
+import { FLAVORS } from "../lib/flavors";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -38,6 +39,11 @@ export function PhoneFrame({ children }: { children: ReactNode }) {
 // from there; without the 3D scene the pixel can fills the slot instead.
 export function TrackingScreen({ flatCan }: { flatCan: boolean }) {
   const recent = orders.filter((o) => o.status === "Entregue").slice(0, 2);
+  // Same order and route the system shows under Pedidos and Rotas.
+  const live = orders.find((o) => o.status === "Em rota");
+  const liveRoute = routes.find((r) => r.id === live?.routeId);
+  const liveCases = live?.items.reduce((sum, item) => sum + item.cases, 0) ?? 0;
+  const livePack = products.find((p) => p.id === live?.items[0]?.productId)?.pack;
   return (
     <div className="ps-app">
       <header className="ps-head">
@@ -57,9 +63,11 @@ export function TrackingScreen({ flatCan }: { flatCan: boolean }) {
             <i />
             Em rota
           </span>
-          <strong>Pedido nº 100000000004</strong>
-          <span className="ps-muted">12 caixas · Lata 350ml</span>
-          <span className="ps-eta">Chega hoje, 10:40</span>
+          <strong>Pedido nº {live?.id}</strong>
+          <span className="ps-muted">
+            {liveCases} packs · {livePack}
+          </span>
+          <span className="ps-eta">Chega hoje, {liveRoute?.eta}</span>
         </div>
         <ol className="ps-steps">
           <li className="done">Fábrica</li>
@@ -74,7 +82,7 @@ export function TrackingScreen({ flatCan }: { flatCan: boolean }) {
           <li key={o.id}>
             <img className="pixel" src={can} alt="" />
             <div>
-              <strong>{brl.format(o.total)}</strong>
+              <strong>{brl.format(orderTotal(o.items))}</strong>
               <span>
                 {o.origin} · {o.date}
               </span>
@@ -91,7 +99,7 @@ export function TrackingScreen({ flatCan }: { flatCan: boolean }) {
 
 // The can lands in the featured card's slot and jumps out again toward the close.
 export function ShopScreen({ flatCan }: { flatCan: boolean }) {
-  const [featured, family] = products;
+  const [featured, second] = products;
   return (
     <div className="ps-app">
       <div className="ps-search">
@@ -103,9 +111,9 @@ export function ShopScreen({ flatCan }: { flatCan: boolean }) {
       </div>
       <div className="ps-chips">
         <span className="on">Para você</span>
-        <span>Zero</span>
-        <span>Gelo</span>
-        <span>Família</span>
+        <span>Limão</span>
+        <span>Uva</span>
+        <span>Laranja</span>
       </div>
 
       <div className="ps-feature">
@@ -113,7 +121,7 @@ export function ShopScreen({ flatCan }: { flatCan: boolean }) {
           <span className="ps-tag">Mais pedido na sua região</span>
           <strong>{featured.name}</strong>
           <span className="ps-muted">
-            {featured.pack} · Caixa {featured.caseSize}
+            {featured.pack} · Pack {featured.caseSize}
           </span>
           <b>{brl.format(featured.price * featured.caseSize)}</b>
         </div>
@@ -123,13 +131,13 @@ export function ShopScreen({ flatCan }: { flatCan: boolean }) {
       </div>
 
       <div className="ps-sku">
-        <img className="pixel" src={can} alt="" />
+        <img className="pixel" src={FLAVORS[second.flavor].image} alt="" />
         <div>
-          <strong>{family.name}</strong>
+          <strong>{second.name}</strong>
           <span>
-            {family.pack} · Caixa {family.caseSize}
+            {second.pack} · Pack {second.caseSize}
           </span>
-          <b>{brl.format(family.price * family.caseSize)}</b>
+          <b>{brl.format(second.price * second.caseSize)}</b>
         </div>
         <span className="ps-stepper">
           <i>−</i>1<i>+</i>

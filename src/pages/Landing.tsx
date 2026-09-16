@@ -250,11 +250,9 @@ export function Landing() {
       <header className="landing-top">
         <BrandMark />
         <nav className="landing-nav" aria-label="Entrada">
-          <Link className="btn btn-ghost" to="/login">
+          {/* One door: signed out it asks for the login, signed in it opens Rotas directly. */}
+          <Link className="btn btn-primary" to="/rotas" viewTransition>
             Entrar
-          </Link>
-          <Link className="btn btn-primary" to="/produtos">
-            Sistema
           </Link>
         </nav>
         <div className="page-line" aria-hidden="true" />
@@ -284,7 +282,7 @@ export function Landing() {
             <span>Consumo adequado para qualquer situação.</span>
           </h1>
           <div className="hero-actions">
-            <Link className="btn btn-primary btn-lg" to="/produtos">
+            <Link className="btn btn-primary btn-lg" to="/produtos" viewTransition>
               Fazer um pedido
             </Link>
             <a className="hero-link" href="#app">
@@ -414,7 +412,7 @@ export function Landing() {
           <p className="kicker">Joja Co.</p>
           <h2>Da linha de envase à gôndola.</h2>
           <p>Controle integrado de ponta a ponta. Fábrica, frota, mercado.</p>
-          <Link className="btn btn-primary btn-lg" to="/login">
+          <Link className="btn btn-primary btn-lg" to="/login" viewTransition>
             Abrir o sistema
           </Link>
         </div>

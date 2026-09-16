@@ -98,25 +98,40 @@ function iceNormalMap(size = 128) {
   return texture;
 }
 
-function IceCubes({ count }: { count: number }) {
+/** "page": cubes spread down the whole landing scroll. "panel": a cluster framed by the login's visual panel. */
+type IceLayout = "page" | "panel";
+
+function IceCubes({ count, layout }: { count: number; layout: IceLayout }) {
   const cubes = useRef<(THREE.Group | null)[]>([]);
   const { geometry, refraction, normalMap, normalScale, frost, items } = useMemo(() => {
     const rand = seeded(42);
-    // Copy sits on the left of most sections: cubes there stay far back and
-    // small; close cubes live on the right, clear of the can's lane.
+    const portrait = window.innerWidth / window.innerHeight < 0.8;
     const items = Array.from({ length: count }, (_, i) => {
-      const lane = rand();
-      let [x, z, size] =
-        lane < 0.3
-          ? [-2.6 - rand() * 3.4, -4 - rand() * 4, 0.35 + rand() * 0.35]
-          : lane < 0.55
-            ? [0.2 + rand() * 2.4, -2.6 - rand() * 3.4, 0.4 + rand() * 0.4]
-            : [2.8 + rand() * 2.7, -4.2 + rand() * 5.2, 0.3 + rand() * 0.45];
-      const y = 3 - (i / count) * 31 - rand() * 1.2;
-      // Varejo mirrors the layout (copy on the right): keep that band's right lane far back.
-      if (y < -19.5 && y > -25 && x > 0) {
-        z = -6.5 - rand() * 1.5;
-        size *= 0.7;
+      let x: number;
+      let y: number;
+      let z: number;
+      let size: number;
+      if (layout === "panel") {
+        // The panel is the right half of the viewport (a top band on phones), around the hero camera.
+        [x, y, z, size] = portrait
+          ? [-1.5 + rand() * 3, 0.5 + rand() * 2.4, -1.5 - rand() * 3.5, 0.28 + rand() * 0.3]
+          : [0.2 + rand() * 4.2, -2.6 + rand() * 5.2, -0.5 - rand() * 4.5, 0.3 + rand() * 0.4];
+      } else {
+        // Copy sits on the left of most sections: cubes there stay far back and
+        // small; close cubes live on the right, clear of the can's lane.
+        const lane = rand();
+        [x, z, size] =
+          lane < 0.3
+            ? [-2.6 - rand() * 3.4, -4 - rand() * 4, 0.35 + rand() * 0.35]
+            : lane < 0.55
+              ? [0.2 + rand() * 2.4, -2.6 - rand() * 3.4, 0.4 + rand() * 0.4]
+              : [2.8 + rand() * 2.7, -4.2 + rand() * 5.2, 0.3 + rand() * 0.45];
+        y = 3 - (i / count) * 31 - rand() * 1.2;
+        // Varejo mirrors the layout (copy on the right): keep that band's right lane far back.
+        if (y < -19.5 && y > -25 && x > 0) {
+          z = -6.5 - rand() * 1.5;
+          size *= 0.7;
+        }
       }
       return {
         position: [x, y, z] as const,
@@ -143,7 +158,7 @@ function IceCubes({ count }: { count: number }) {
       }),
       items,
     };
-  }, [count]);
+  }, [count, layout]);
 
   useFrame((frame, delta) => {
     const time = frame.clock.elapsedTime;
@@ -426,8 +441,9 @@ function FrostOverlay() {
 const noPointer = { pointerEvents: "none" } as const;
 const camera = { fov: FOV, near: 0.1, far: 60, position: [0, 0.25, 13] as [number, number, number] };
 
-export function Scene3D() {
+export function Scene3D({ layout = "page" }: { layout?: IceLayout }) {
   const portrait = typeof window !== "undefined" && window.innerWidth / window.innerHeight < 0.8;
+  const cubes = layout === "panel" ? (portrait ? 8 : 12) : portrait ? 14 : 26;
 
   return (
     <>
@@ -442,7 +458,7 @@ export function Scene3D() {
           <ambientLight intensity={0.3} />
           <directionalLight position={[4, 6, 5]} intensity={2.2} color="#ffffff" />
           <directionalLight position={[-5, -3, 2]} intensity={1.2} color="#00e5ff" />
-          <IceCubes count={portrait ? 14 : 26} />
+          <IceCubes count={cubes} layout={layout} />
           <Dust />
           <EffectComposer multisampling={4}>
             <Bloom mipmapBlur luminanceThreshold={0.92} luminanceSmoothing={0.12} intensity={0.9} radius={0.7} />

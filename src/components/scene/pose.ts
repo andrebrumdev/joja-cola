@@ -39,6 +39,8 @@ const DEPTH = 4.5;
 const CAN_HEIGHT = 2.1;
 /** Slight top-down view of the lid, identical in every chapter. */
 const PITCH = 0.06;
+/** Login duo: seconds between two toasts. */
+const CHEERS_PERIOD = 4.8;
 
 export const pose = {
   camera: v(0, 0.25, 13),
@@ -76,6 +78,8 @@ const motion = {
   last: new THREE.Vector3(),
   primed: false,
   clinkArmed: true,
+  /** Login duo: the toast cycle that already clinked. */
+  cheersCycle: -1,
 };
 const probe = new THREE.PerspectiveCamera(FOV, 1, 0.1, 60);
 const tmp = {
@@ -124,6 +128,11 @@ export function updatePose() {
   const intro = sceneScroll.intro;
 
   sceneScroll.velocity = THREE.MathUtils.damp(sceneScroll.velocity, 0, 2.5, delta);
+  if (sceneScroll.snap) {
+    motion.chapter = sceneScroll.chapter;
+    motion.primed = false;
+    sceneScroll.snap = false;
+  }
   motion.chapter = THREE.MathUtils.damp(motion.chapter, sceneScroll.chapter, 5, delta);
 
   const clamped = THREE.MathUtils.clamp(motion.chapter, 0, CHAPTERS - 1);
@@ -188,7 +197,9 @@ export function updatePose() {
   // Toast: the guest can swings in from the left, tops tilt together, clink as
   // the beat centres, then it drops out of frame. Scrubbed by scroll; the clink
   // itself is a time-based impulse so it lands the same at any scroll speed.
-  const enter = smoothstep(TOAST_CHAPTER - 0.38, TOAST_CHAPTER - 0.02, clamped);
+  // The login holds the guest can in (duo) instead of scrubbing it with scroll.
+  const duo = sceneScroll.duo;
+  const enter = Math.max(smoothstep(TOAST_CHAPTER - 0.38, TOAST_CHAPTER - 0.02, clamped), duo);
   const leave = smoothstep(TOAST_CHAPTER + 0.05, TOAST_CHAPTER + 0.42, clamped);
   const presence = enter * (1 - leave);
   // Portrait: two cans side by side must fit the width.
@@ -209,6 +220,8 @@ export function updatePose() {
     } else {
       tmp.edge.copy(tmp.clinkAt).addScaledVector(tmp.right, -3.2 * canWidth).addScaledVector(tmp.up, -0.7 * canHeight);
       pose.toast.position.lerpVectors(tmp.edge, tmp.clinkAt, 1 - (1 - enter) ** 3);
+      // Duo: the guest waits a little apart and swings in for each toast.
+      if (duo > 0) pose.toast.position.addScaledVector(tmp.right, -(1 - cheersReach(now)) * 0.4 * canWidth * duo);
     }
     pose.toast.scale = pose.canScale;
   }
@@ -216,8 +229,14 @@ export function updatePose() {
   // clink on arriving near the centre, re-arm once the beat is left behind.
   const toastDistance = Math.abs(clamped - TOAST_CHAPTER);
   if (toastDistance > 0.15) motion.clinkArmed = true;
-  if (motion.clinkArmed && toastDistance < 0.03 && presence > 0.8) {
-    motion.clinkArmed = false;
+  const scrollClink = motion.clinkArmed && toastDistance < 0.03 && presence > 0.8;
+  const cycle = Math.floor(now / CHEERS_PERIOD);
+  // The first duo toast waits for a whole swing, so it never clinks with the cans still apart.
+  if (duo < 0.98) motion.cheersCycle = cycle;
+  const duoClink = cycle !== motion.cheersCycle && (now / CHEERS_PERIOD) % 1 >= 0.5;
+  if (scrollClink || duoClink) {
+    if (scrollClink) motion.clinkArmed = false;
+    if (duoClink) motion.cheersCycle = cycle;
     pose.clink.time = now;
     pose.clink.origin
       .copy(pose.can)
@@ -261,6 +280,12 @@ export function updatePose() {
 
   pose.frost = smoothstep(FROST_CHAPTER - 0.45, FROST_CHAPTER - 0.05, clamped) *
     (1 - smoothstep(FROST_CHAPTER + 0.3, FROST_CHAPTER + 0.75, clamped));
+}
+
+/** Duo swing: 0 while the guest waits apart, 1 at the clink (mid-cycle). */
+function cheersReach(now: number) {
+  const phase = (now / CHEERS_PERIOD) % 1;
+  return Math.exp(-(((phase - 0.5) / 0.1) ** 2));
 }
 
 export function applyCamera(camera: THREE.Camera) {

@@ -3,6 +3,7 @@ import { useFrame, type ThreeElements } from "@react-three/fiber";
 import { useGLTF, useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { pose } from "./scene/pose";
+import { FLAVORS, PALETTE_ROLES, SOURCE_PALETTE, type FlavorId } from "../lib/flavors";
 
 export const CAN_MODEL_URL = `${import.meta.env.BASE_URL}models/SodaCan.glb`;
 // Print baked from src/assets/can.png by scripts/build-can-label.py into this model's label UVs.
@@ -14,6 +15,8 @@ const METAL_FROST = new THREE.Color("#eefbff");
 // from the view angle (normal.x in view space: -1 left edge, +1 right edge) so
 // the 3D can reads like the drawing from any rotation, in the drawing's colours.
 // uFrost grows patchy crystalline frost over the print for the "Gelada." beat.
+// uSrc/uDst recolour the print for a flavor: each drawn role maps to the flavor's
+// colour for that role (identity for Tradicional).
 const labelVertex = /* glsl */ `
   varying vec2 vUv;
   varying vec3 vNormal;
@@ -22,8 +25,15 @@ const labelVertex = /* glsl */ `
   void main() {
     vUv = uv;
     vPos = position;
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vNormal = normalize(normalMatrix * normal);
+    vec4 local = vec4(position, 1.0);
+    vec3 objectNormal = normal;
+    // Packs draw many cans as one InstancedMesh; three defines USE_INSTANCING for those.
+    #ifdef USE_INSTANCING
+      local = instanceMatrix * local;
+      objectNormal = mat3(instanceMatrix) * objectNormal;
+    #endif
+    vec4 mv = modelViewMatrix * local;
+    vNormal = normalize(normalMatrix * objectNormal);
     vViewDir = normalize(-mv.xyz);
     gl_Position = projectionMatrix * mv;
   }
@@ -31,6 +41,9 @@ const labelVertex = /* glsl */ `
 
 const labelFragment = /* glsl */ `
   uniform sampler2D uMap;
+  uniform vec3 uSrc[5];
+  uniform vec3 uDst[5];
+  uniform float uRemap;
   uniform vec3 uShade;
   uniform vec3 uLight;
   uniform vec3 uGlint;
@@ -70,10 +83,24 @@ const labelFragment = /* glsl */ `
   }
 
   void main() {
-    vec3 print = texture2D(uMap, vUv).rgb;
+    vec3 drawn = texture2D(uMap, vUv).rgb;
     vec3 n = normalize(vNormal);
     float x = n.x;
-    float body = step(0.5, dot(print, vec3(0.2126, 0.7152, 0.0722)));
+    // Body vs line is read from the drawn print, so shading bands stay put for every flavor.
+    float body = step(0.5, dot(drawn, vec3(0.2126, 0.7152, 0.0722)));
+
+    vec3 print = drawn;
+    // Tradicional is the print as drawn (uRemap 0). Other flavors move every blue,
+    // including the in-between texels at band and letter edges, to its nearest role;
+    // the near-black outline stays as drawn.
+    float lum = dot(drawn, vec3(0.2126, 0.7152, 0.0722));
+    if (uRemap > 0.5 && lum > 0.02) {
+      float nearest = 10.0;
+      for (int i = 0; i < 5; i++) {
+        float d = distance(drawn, uSrc[i]);
+        if (d < nearest) { nearest = d; print = uDst[i]; }
+      }
+    }
 
     float shade = inBand(x, -0.91, -0.73) + inBand(x, -0.59, -0.53) + inBand(x, 0.78, 1.01);
     float light = inBand(x, -1.01, -0.91) + inBand(x, -0.73, -0.59)
@@ -111,11 +138,16 @@ const labelFragment = /* glsl */ `
 type JojaCanProps = ThreeElements["group"] & {
   /** Render an independent copy of the model, for a second can in the same scene. */
   clone?: boolean;
+  flavor?: FlavorId;
+  /** Follow the landing's frost beat. Off for cans shown outside the scroll scene. */
+  frosted?: boolean;
 };
 
-export function JojaCan({ clone = false, ...props }: JojaCanProps) {
-  const { scene: source, materials } = useGLTF(CAN_MODEL_URL);
-  const scene = useMemo(() => (clone ? source.clone(true) : source), [clone, source]);
+const SOURCE_COLORS = PALETTE_ROLES.map((role) => new THREE.Color(SOURCE_PALETTE[role]));
+const LABEL_NAMES = new Set(["SodaMaterial_Inst", "JojaLabel"]);
+
+/** The label shader for one flavor (frost off until the caller drives uFrost). */
+function useLabelMaterial(flavor: FlavorId) {
   const print = useTexture(LABEL_URL, (t) => {
     t.flipY = false;
     t.colorSpace = THREE.SRGBColorSpace;
@@ -123,15 +155,18 @@ export function JojaCan({ clone = false, ...props }: JojaCanProps) {
     t.anisotropy = 8;
   });
 
-  const labelMaterial = useMemo(
+  const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
         name: "JojaLabel",
         uniforms: {
           uMap: { value: print },
-          uShade: { value: new THREE.Color("#1485fd") },
-          uLight: { value: new THREE.Color("#a5fdff") },
-          uGlint: { value: new THREE.Color("#e8ffff") },
+          uSrc: { value: SOURCE_COLORS },
+          uDst: { value: PALETTE_ROLES.map(() => new THREE.Color()) },
+          uRemap: { value: 0 },
+          uShade: { value: new THREE.Color() },
+          uLight: { value: new THREE.Color() },
+          uGlint: { value: new THREE.Color() },
           uOutline: { value: new THREE.Color("#1a1e3b") },
           uFrost: { value: 0 },
           uTime: { value: 0 },
@@ -142,6 +177,63 @@ export function JojaCan({ clone = false, ...props }: JojaCanProps) {
       }),
     [print],
   );
+
+  useLayoutEffect(() => {
+    const f = FLAVORS[flavor];
+    const u = material.uniforms;
+    PALETTE_ROLES.forEach((role, i) => (u.uDst.value as THREE.Color[])[i].set(f.palette[role]));
+    u.uRemap.value = flavor === "tradicional" ? 0 : 1;
+    (u.uShade.value as THREE.Color).set(f.shade);
+    (u.uLight.value as THREE.Color).set(f.palette.light);
+    (u.uGlint.value as THREE.Color).set(f.glint);
+  }, [flavor, material]);
+
+  useLayoutEffect(() => () => material.dispose(), [material]);
+  return material;
+}
+
+export type CanPart = { geometry: THREE.BufferGeometry; material: THREE.Material; matrix: THREE.Matrix4 };
+
+/**
+ * The can split into its drawable parts (aluminium, label, seal), each with its own
+ * material and its transform inside the model, for drawing many cans as InstancedMeshes.
+ * Metals are private copies in the landing's resting tint, so no other scene's frost reaches them.
+ */
+export function useCanParts(flavor: FlavorId): CanPart[] {
+  const { scene } = useGLTF(CAN_MODEL_URL);
+  const label = useLabelMaterial(flavor);
+
+  const parts = useMemo(() => {
+    const list: CanPart[] = [];
+    scene.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      // Transform relative to the model root (the root itself may sit in another scene).
+      const matrix = new THREE.Matrix4();
+      for (let node: THREE.Object3D | null = mesh; node && node !== scene; node = node.parent) {
+        node.updateMatrix();
+        matrix.premultiply(node.matrix);
+      }
+      const source = mesh.material as THREE.Material;
+      const material = LABEL_NAMES.has(source.name)
+        ? label
+        : Object.assign((source as THREE.MeshStandardMaterial).clone(), { color: METAL_TINT.clone() });
+      list.push({ geometry: mesh.geometry, material, matrix });
+    });
+    return list;
+  }, [scene, label]);
+
+  useLayoutEffect(
+    () => () => parts.forEach((part) => part.material !== label && part.material.dispose()),
+    [parts, label],
+  );
+  return parts;
+}
+
+export function JojaCan({ clone = false, flavor = "tradicional", frosted = true, ...props }: JojaCanProps) {
+  const { scene: source, materials } = useGLTF(CAN_MODEL_URL);
+  const scene = useMemo(() => (clone ? source.clone(true) : source), [clone, source]);
+  const labelMaterial = useLabelMaterial(flavor);
 
   const metals = useMemo(
     () =>
@@ -156,18 +248,17 @@ export function JojaCan({ clone = false, ...props }: JojaCanProps) {
     scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
       if (!mesh.isMesh) return;
-      const name = (mesh.material as THREE.Material).name;
-      if (name === "SodaMaterial_Inst" || name === "JojaLabel") mesh.material = labelMaterial;
+      if (LABEL_NAMES.has((mesh.material as THREE.Material).name)) mesh.material = labelMaterial;
     });
-    return () => labelMaterial.dispose();
   }, [scene, labelMaterial]);
 
   useFrame((state) => {
-    labelMaterial.uniforms.uFrost.value = pose.frost;
+    const frost = frosted ? pose.frost : 0;
+    labelMaterial.uniforms.uFrost.value = frost;
     labelMaterial.uniforms.uTime.value = state.clock.elapsedTime;
     for (const { material, roughness } of metals) {
-      material.color.lerpColors(METAL_TINT, METAL_FROST, pose.frost * 0.55);
-      material.roughness = THREE.MathUtils.lerp(roughness, 1, pose.frost * 0.6);
+      material.color.lerpColors(METAL_TINT, METAL_FROST, frost * 0.55);
+      material.roughness = THREE.MathUtils.lerp(roughness, 1, frost * 0.6);
     }
   });
 

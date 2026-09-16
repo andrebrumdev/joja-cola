@@ -7,6 +7,10 @@ export const sceneScroll = {
   velocity: 0,
   /** hero entrance, 0 → 1 */
   intro: 0,
+  /** Login: the second can stays in and the two keep toasting, 0 → 1 */
+  duo: 0,
+  /** Set when a page opens on a chapter: the scene lands there instead of travelling from the last page's. */
+  snap: false,
 };
 
 // Each chapter parks the can in a layout slot: [data-can-anchor="<name>"].
