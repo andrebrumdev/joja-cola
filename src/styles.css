@@ -2575,18 +2575,22 @@ p { margin: 0; color: var(--body); }
 }
 
 /* A phone on its side: the stacked scene would push the whole form below the fold, so the
-   card goes back to two columns, form first. */
-@media (max-width: 860px) and (orientation: landscape) and (max-height: 540px) {
+   card goes back to two columns, form first. The width floor matters: an open keyboard makes
+   a portrait phone's viewport wider than tall too, and that must stay stacked. */
+@media (min-width: 568px) and (max-width: 860px) and (orientation: landscape) and (max-height: 540px) {
+  .login-back-rest { display: none; }
   .login-page { padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
   .login-card { grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); grid-template-rows: auto; }
-  .login-visual { order: 0; height: auto; border-radius: 0 23px 23px 0; }
+  /* Size container: the stretched grid cell sets its size, so the cans can follow its width. */
+  .login-visual { order: 0; height: auto; border-radius: 0 23px 23px 0; container-type: size; }
   .login-visual::after { background: linear-gradient(180deg, rgba(3, 8, 20, 0.6) 0%, transparent 22%); }
   .login-form-side { gap: 12px; padding: 20px 28px calc(16px + env(safe-area-inset-bottom)); border-radius: 23px 0 0 23px; }
   .login-form { gap: 14px; }
   .login-head h1 { font-size: 26px; }
   .login-head p { margin-top: 6px; font-size: 14px; }
-  /* A narrow panel: smaller cans, host to the right, so the guest swinging in from the left stays inside. */
-  .can-slot-login { left: 64%; top: 54%; height: 32%; }
+  /* A narrow panel: the pair's size follows the panel width, host to the right, so the guest
+     swinging in from the left stays inside. */
+  .can-slot-login { left: 64%; top: 56%; height: min(32%, 26cqw); }
 }
 
 @media (prefers-reduced-motion: reduce) {
