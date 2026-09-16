@@ -2,8 +2,14 @@ import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { type FleetRoute } from "../data/mock";
 import { boundsOf, pointOnPath, splitPath, type LngLat } from "../lib/geo";
+
+// MapLibre looks for its worker next to its own module (./maplibre-gl-worker.mjs), which a
+// production bundle does not emit. Vite bundles the worker (with its shared chunk) as its own
+// file, and MapLibre is told where it is.
+maplibregl.setWorkerUrl(workerUrl);
 
 const LOOP_MS = 18000;
 const PITCH = 35;

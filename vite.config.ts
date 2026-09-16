@@ -7,4 +7,6 @@ export default defineConfig(({ command, isPreview }) => ({
   plugins: [react()],
   server: { port: 5173, strictPort: true },
   optimizeDeps: { exclude: ["maplibre-gl"] },
+  // MapLibre's worker is an ES module; keep it one when Vite bundles it.
+  worker: { format: "es" },
 }));
