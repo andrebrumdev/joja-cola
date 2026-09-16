@@ -57,27 +57,45 @@ export function Login() {
     const panel = visualRef.current;
     if (reduce || !root || !panel) return;
     let frame = 0;
+    let observedScene: Element | null = null;
     const update = () => {
       frame = 0;
       const r = panel.getBoundingClientRect();
-      const { clientWidth, clientHeight } = document.documentElement;
+      // Measure the insets against the scene layer itself, not the layout viewport: on iOS
+      // Safari a fixed `inset: 0` layer is taller than clientHeight while the toolbar shows,
+      // and a clip computed from clientHeight let the scene spill over the form below.
+      const scene = root.querySelector(".scene3d");
+      if (scene && scene !== observedScene) {
+        observer.observe(scene);
+        observedScene = scene;
+      }
+      const s = scene?.getBoundingClientRect() ?? {
+        top: 0,
+        left: 0,
+        right: document.documentElement.clientWidth,
+        bottom: document.documentElement.clientHeight,
+      };
       const radius = getComputedStyle(panel).borderRadius;
       root.style.setProperty(
         "--scene-clip",
-        `inset(${r.top}px ${clientWidth - r.right}px ${clientHeight - r.bottom}px ${r.left}px round ${radius})`,
+        `inset(${r.top - s.top}px ${s.right - r.right}px ${s.bottom - r.bottom}px ${r.left - s.left}px round ${radius})`,
       );
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
     };
-    update();
     const observer = new ResizeObserver(schedule);
     observer.observe(panel);
+    // The scene is a lazy chunk: measure again once its layers mount.
+    const mounts = new MutationObserver(schedule);
+    mounts.observe(root, { childList: true });
+    update();
     window.addEventListener("resize", schedule);
     window.addEventListener("scroll", schedule, { passive: true });
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      mounts.disconnect();
       window.removeEventListener("resize", schedule);
       window.removeEventListener("scroll", schedule);
     };
@@ -120,7 +138,16 @@ export function Login() {
     navigate(from, { replace: true, viewTransition: true });
   }
 
-  const errorText = error === "email" ? "Informe o e-mail para entrar." : "Informe a senha para entrar.";
+  // Shown under the field it is about, not after the whole form.
+  const errorMessage = (
+    <p className="login-error" id={errorId} role="alert">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v5M12 16h.01" />
+      </svg>
+      {error === "email" ? "Informe o e-mail para entrar." : "Informe a senha para entrar."}
+    </p>
+  );
 
   return (
     <div className="login-page" ref={rootRef}>
@@ -132,11 +159,14 @@ export function Login() {
 
       <main className="login-card">
         <section className="login-form-side" aria-labelledby="login-title">
-          <Link className="login-back" to="/" viewTransition>
+          {/* On phones this sits over the scene as a chip; narrow ones show just "Voltar". */}
+          <Link className="login-back" to="/" viewTransition aria-label="Voltar à apresentação">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M19 12H5M11 18l-6-6 6-6" />
             </svg>
-            Voltar à apresentação
+            <span>
+              Voltar<span className="login-back-rest"> à apresentação</span>
+            </span>
           </Link>
 
           <form className="login-form" onSubmit={onSubmit} noValidate>
@@ -164,6 +194,7 @@ export function Login() {
                   }}
                 />
               </div>
+              {error === "email" ? errorMessage : null}
             </div>
 
             <div className="login-field">
@@ -196,17 +227,8 @@ export function Login() {
                   </svg>
                 </button>
               </div>
+              {error === "password" ? errorMessage : null}
             </div>
-
-            {error ? (
-              <p className="login-error" id={errorId} role="alert">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 8v5M12 16h.01" />
-                </svg>
-                {errorText}
-              </p>
-            ) : null}
 
             <button className="btn btn-primary btn-lg login-submit" type="submit">
               Entrar

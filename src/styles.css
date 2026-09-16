@@ -1410,6 +1410,9 @@ p { margin: 0; color: var(--body); }
 .login-form-side {
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* Above both scene layers (a grid item stacks without needing position), so the scene can
+     only ever show through the visual panel, whatever its clip does. */
+  z-index: 11;
   justify-items: center;
   gap: 24px;
   padding: 24px clamp(24px, 4vw, 56px) 28px;
@@ -2522,19 +2525,68 @@ p { margin: 0; color: var(--body); }
   }
   .cart-dock p { display: grid; line-height: 1.25; }
   .cart-dock b { color: var(--text); font-size: 18px; font-variant-numeric: tabular-nums; }
-  .login-page { place-items: start center; padding: 12px; }
-  .login-card { grid-template-columns: minmax(0, 1fr); min-height: 0; border-radius: 24px; }
-  .login-visual { order: -1; min-height: 0; height: clamp(230px, 32svh, 300px); border-radius: 23px 23px 0 0; }
-  .login-form-side { gap: 12px; padding: 8px 20px 24px; border-radius: 0 0 23px 23px; }
+  /* Stacked: the scene on top, melting into the form, and the card fills the screen. */
+  .login-page { place-items: start center; padding: max(12px, env(safe-area-inset-top)) 12px 12px; }
+  .login-card {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr);
+    /* The form row takes the extra height; the scene row stays the scene's own height. */
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: calc(100svh - 24px);
+    border-radius: 24px;
+  }
+  .login-visual { order: -1; min-height: 0; height: clamp(230px, 34svh, 400px); border-radius: 23px 23px 0 0; }
+  .login-visual::after {
+    background:
+      linear-gradient(180deg, rgba(3, 8, 20, 0.6) 0%, transparent 22%),
+      linear-gradient(0deg, var(--panel) 0%, color-mix(in srgb, var(--panel) 55%, transparent) 16%, transparent 38%);
+  }
+  .login-form-side {
+    grid-template-rows: minmax(0, 1fr) auto;
+    gap: 16px;
+    padding: 0 20px calc(20px + env(safe-area-inset-bottom));
+    border-radius: 0 0 23px 23px;
+  }
+  /* The way back becomes a chip in the scene's top corner, opposite the logo. */
+  .login-back {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 30;
+    padding: 0 14px 0 10px;
+    border: 1px solid rgba(127, 233, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(5, 11, 24, 0.72);
+    color: var(--body);
+  }
   .login-visual-copy { display: none; }
   .login-logo { top: 12px; left: 20px; }
-  .can-slot-login { left: 56%; top: 56%; height: 64%; }
+  .can-slot-login { left: 54%; top: 52%; height: 62%; }
   .login-head { margin-bottom: 4px; }
   .order-main { flex-direction: column; gap: 4px; }
   .order-live .btn { width: 100%; }
   .hbar { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 6px 8px; }
   .hbar-track { grid-column: 1 / -1; grid-row: 2; }
   .hbar-value { grid-column: 2; grid-row: 1; }
+}
+
+@media (max-width: 480px) {
+  .login-back-rest { display: none; }
+}
+
+/* A phone on its side: the stacked scene would push the whole form below the fold, so the
+   card goes back to two columns, form first. */
+@media (max-width: 860px) and (orientation: landscape) and (max-height: 540px) {
+  .login-page { padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
+  .login-card { grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); grid-template-rows: auto; }
+  .login-visual { order: 0; height: auto; border-radius: 0 23px 23px 0; }
+  .login-visual::after { background: linear-gradient(180deg, rgba(3, 8, 20, 0.6) 0%, transparent 22%); }
+  .login-form-side { gap: 12px; padding: 20px 28px calc(16px + env(safe-area-inset-bottom)); border-radius: 23px 0 0 23px; }
+  .login-form { gap: 14px; }
+  .login-head h1 { font-size: 26px; }
+  .login-head p { margin-top: 6px; font-size: 14px; }
+  /* A narrow panel: smaller cans, host to the right, so the guest swinging in from the left stays inside. */
+  .can-slot-login { left: 64%; top: 54%; height: 32%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
