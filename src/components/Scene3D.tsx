@@ -98,12 +98,161 @@ function iceNormalMap(size = 128) {
   return texture;
 }
 
+// ---- Ice: what makes a rounded glass box read as a frozen cube ----
+
+/** A few melted cube shapes: a rounded box pushed in and out by smooth noise. Displacement
+ *  depends only on position, so vertices shared by two faces stay welded. */
+function meltedIceGeometries(variants: number) {
+  return Array.from({ length: variants }, (_, v) => {
+    const geometry = new RoundedBoxGeometry(1, 1, 1, 5, 0.16);
+    const rand = seeded(101 + v * 17);
+    const waves = Array.from({ length: 4 }, () => ({
+      dir: new THREE.Vector3(rand() - 0.5, rand() - 0.5, rand() - 0.5).normalize(),
+      freq: 3 + rand() * 4,
+      phase: rand() * Math.PI * 2,
+      amp: 0.012 + rand() * 0.018,
+    }));
+    const position = geometry.attributes.position as THREE.BufferAttribute;
+    const p = new THREE.Vector3();
+    for (let i = 0; i < position.count; i++) {
+      p.fromBufferAttribute(position, i);
+      let bump = 0;
+      for (const w of waves) bump += Math.sin(p.dot(w.dir) * w.freq + w.phase) * w.amp;
+      // Corners melt most: pull them in a little.
+      const corner = Math.max(0, p.length() - 0.62) * 0.35;
+      p.multiplyScalar(1 + bump - corner);
+      position.setXYZ(i, p.x, p.y, p.z);
+    }
+    geometry.computeVertexNormals();
+    return geometry;
+  });
+}
+
+const iceNoise = /* glsl */ `
+  float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+  }
+  float noise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(hash31(i), hash31(i + vec3(1, 0, 0)), f.x), mix(hash31(i + vec3(0, 1, 0)), hash31(i + vec3(1, 1, 0)), f.x), f.y),
+      mix(mix(hash31(i + vec3(0, 0, 1)), hash31(i + vec3(1, 0, 1)), f.x), mix(hash31(i + vec3(0, 1, 1)), hash31(i + vec3(1, 1, 1)), f.x), f.y),
+      f.z);
+  }
+  float fbm3(vec3 p) { return 0.6 * noise3(p) + 0.4 * noise3(p * 2.07 + 7.1); }
+`;
+
+const iceInteriorVertex = /* glsl */ `
+  varying vec3 vPos;
+  varying vec3 vCamera;
+  varying vec3 vNormalView;
+  varying vec3 vViewDir;
+  void main() {
+    vPos = position;
+    // The camera in this cube's own space, so the interior is marched in object units.
+    vCamera = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vNormalView = normalize(normalMatrix * normal);
+    vViewDir = normalize(-mv.xyz);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+// Drawn on the cube's own front faces (same geometry, depth equal), after the glass:
+// march a short way into the cube and gather what real freezer ice has inside.
+const iceInteriorFragment = /* glsl */ `
+  uniform float uSeed;
+  uniform vec3 uCrack;
+  varying vec3 vPos;
+  varying vec3 vCamera;
+  varying vec3 vNormalView;
+  varying vec3 vViewDir;
+  ${iceNoise}
+
+  void main() {
+    vec3 rd = normalize(vPos - vCamera);
+    vec3 p = vPos;
+    const int STEPS = 12;
+    float dt = 0.085;
+    // Jitter the start per pixel so the steps never show as bands.
+    p += rd * dt * hash31(vec3(gl_FragCoord.xy, uSeed));
+    float milk = 0.0;
+    float sparkle = 0.0;
+    for (int i = 0; i < STEPS; i++) {
+      p += rd * dt;
+      if (max(max(abs(p.x), abs(p.y)), abs(p.z)) > 0.5) break;
+      vec3 q = p + uSeed;
+      float n = fbm3(q * 3.3);
+      // Milky core: the air that freezes last, trapped in the middle.
+      float core = smoothstep(0.34, 0.02, length(p * vec3(1.0, 1.3, 1.0)) + (n - 0.5) * 0.34);
+      // Small trapped bubbles, denser towards the core.
+      vec3 cell = floor(q * 12.0);
+      float bubble = step(0.9 - core * 0.08, hash31(cell)) * smoothstep(0.22, 0.06, length(fract(q * 12.0) - 0.5));
+      milk += core * 1.5 * dt;
+      sparkle += bubble * dt * 4.0;
+    }
+
+    // One fracture sheet, found exactly rather than sampled (sampling a thin sheet leaves
+    // contour lines). The plane is bent by noise, refined with a second intersection.
+    float crack = 0.0;
+    vec3 r0 = vPos;
+    float facingCrack = dot(rd, uCrack);
+    if (abs(facingCrack) > 0.02) {
+      float t = -dot(r0, uCrack) / facingCrack;
+      vec3 hit = r0 + rd * max(t, 0.0);
+      float bend = (fbm3(hit * 2.6 + uSeed) - 0.5) * 0.22;
+      t = -(dot(r0, uCrack) + bend) / facingCrack;
+      hit = r0 + rd * t;
+      if (t > 0.0 && max(max(abs(hit.x), abs(hit.y)), abs(hit.z)) < 0.5) {
+        // Only part of the sheet cracked, with a ragged edge; seen edge-on it catches light.
+        float sheet = smoothstep(0.5, 0.62, fbm3(hit * 4.0 + uSeed * 2.3)) * smoothstep(0.5, 0.3, length(hit));
+        crack = sheet * (0.35 + 0.65 * pow(1.0 - abs(facingCrack), 4.0));
+      }
+    }
+    milk += crack * 0.5;
+
+    // Frosted edges: grazing angles scatter to white, broken up by a frost pattern.
+    float facing = abs(dot(normalize(vNormalView), normalize(vViewDir)));
+    float fresnel = pow(1.0 - facing, 3.0);
+    float frost = fbm3(vPos * 8.0 + uSeed * 1.7);
+    float rim = fresnel * (0.2 + 0.6 * frost);
+
+    float inside = clamp(milk, 0.0, 0.7);
+    vec3 insideColor = mix(vec3(0.7, 0.9, 1.0), vec3(1.0), clamp(milk * 1.6, 0.0, 1.0));
+    vec3 color = insideColor * inside + vec3(1.0) * clamp(sparkle, 0.0, 0.6) + vec3(0.88, 0.98, 1.0) * rim;
+    float alpha = clamp(inside + sparkle * 0.6 + rim * 0.7, 0.0, 0.9);
+    gl_FragColor = vec4(color, alpha);
+  }
+`;
+
+function iceInteriorMaterial(seed: number, crack: THREE.Vector3) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uSeed: { value: seed }, uCrack: { value: crack } },
+    vertexShader: iceInteriorVertex,
+    fragmentShader: iceInteriorFragment,
+    transparent: true,
+    depthWrite: false,
+    depthFunc: THREE.LessEqualDepth,
+    // Premultiplied: the colour already carries its alpha.
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+}
+
 /** "page": cubes spread down the whole landing scroll. "panel": a cluster framed by the login's visual panel. */
 type IceLayout = "page" | "panel";
 
 function IceCubes({ count, layout }: { count: number; layout: IceLayout }) {
   const cubes = useRef<(THREE.Group | null)[]>([]);
-  const { geometry, refraction, normalMap, normalScale, frost, items } = useMemo(() => {
+  const { geometries, refraction, normalMap, normalScale, interiors, items } = useMemo(() => {
     const rand = seeded(42);
     const portrait = window.innerWidth / window.innerHeight < 0.8;
     const items = Array.from({ length: count }, (_, i) => {
@@ -144,18 +293,19 @@ function IceCubes({ count, layout }: { count: number; layout: IceLayout }) {
         phase: rand() * Math.PI * 2,
       };
     });
+    const shapeRand = seeded(77);
     return {
-      geometry: new RoundedBoxGeometry(1, 1, 1, 4, 0.14),
+      geometries: meltedIceGeometries(3),
       refraction: iceRefractionTexture(),
       normalMap: iceNormalMap(),
       normalScale: new THREE.Vector2(0.3, 0.3),
-      frost: new THREE.MeshBasicMaterial({
-        color: "#dff9ff",
-        transparent: true,
-        opacity: 0.22,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
+      // Each cube gets its own interior: a different noise seed and fracture direction.
+      interiors: items.map(() =>
+        iceInteriorMaterial(
+          shapeRand() * 40,
+          new THREE.Vector3(shapeRand() - 0.5, shapeRand() - 0.5, shapeRand() - 0.5).normalize(),
+        ),
+      ),
       items,
     };
   }, [count, layout]);
@@ -183,24 +333,24 @@ function IceCubes({ count, layout }: { count: number; layout: IceLayout }) {
           rotation={item.rotation}
           scale={item.scale}
         >
-          <mesh geometry={geometry}>
+          <mesh geometry={geometries[i % geometries.length]}>
             <MeshTransmissionMaterial
               buffer={refraction}
               resolution={16}
               backsideResolution={16}
               samples={6}
               transmission={1}
-              thickness={1.1}
-              roughness={0.1}
+              thickness={1.4}
+              roughness={0.06}
               ior={1.31}
               chromaticAberration={0.08}
               anisotropicBlur={0.15}
               distortion={0.35}
               distortionScale={0.5}
               temporalDistortion={0.04}
-              color="#e6fbff"
-              attenuationColor="#9ff0ff"
-              attenuationDistance={1.8}
+              color="#eafcff"
+              attenuationColor="#7fd6f5"
+              attenuationDistance={1.3}
               clearcoat={1}
               clearcoatRoughness={0.06}
               envMapIntensity={2}
@@ -208,7 +358,7 @@ function IceCubes({ count, layout }: { count: number; layout: IceLayout }) {
               normalScale={normalScale}
             />
           </mesh>
-          <mesh geometry={geometry} material={frost} scale={0.55} />
+          <mesh geometry={geometries[i % geometries.length]} material={interiors[i]} renderOrder={1} />
         </group>
       ))}
     </>
